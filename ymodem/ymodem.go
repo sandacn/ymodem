@@ -5,6 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
+
+	"github.com/vbauerster/mpb/v4"
+	"github.com/vbauerster/mpb/v4/decor"
 )
 
 const SOH byte = 0x01
@@ -12,12 +16,17 @@ const STX byte = 0x02
 const EOT byte = 0x04
 const ACK byte = 0x06
 const NAK byte = 0x15
+const CAN byte = 0x18
 const POLL byte = 0x43
 
-const SHORT_PACKET_PAYLOAD_LEN = 128
-const LONG_PACKET_PAYLOAD_LEN = 1024
-
 var InvalidPacket = errors.New("invalid packet")
+
+type File struct {
+	Data   []byte
+	Name   string
+	blocks int
+	bytesBar *mpb.Bar
+}
 
 func CRC16(data []byte) uint16 {
 	var u16CRC uint16 = 0
@@ -68,9 +77,9 @@ func CRC16Constant(data []byte, length int) uint16 {
 	return u16CRC
 }
 
-func sendBlock(c io.ReadWriter, block uint8, data []byte) error {
-	//send STX
-	if _, err := c.Write([]byte{STX}); err != nil {
+func sendBlock(c io.ReadWriter, bs int, block uint8, data []byte) error {
+	// send STX
+	if _, err := c.Write([]byte{SOH}); err != nil {
 		return err
 	}
 	if _, err := c.Write([]byte{block}); err != nil {
@@ -80,15 +89,18 @@ func sendBlock(c io.ReadWriter, block uint8, data []byte) error {
 		return err
 	}
 
-	//send data
+	// send data
 	var toSend bytes.Buffer
 	toSend.Write(data)
-	for toSend.Len() < LONG_PACKET_PAYLOAD_LEN {
-		toSend.Write([]byte{EOT})
+
+	padding := bs - len(data)
+	if padding > 0 {
+		buf := make([]byte, padding)
+		toSend.Write(buf)
 	}
 
-	//calc CRC
-	u16CRC := CRC16Constant(data, LONG_PACKET_PAYLOAD_LEN)
+	// calc CRC
+	u16CRC := CRC16Constant(data, bs)
 	toSend.Write([]byte{uint8(u16CRC >> 8)})
 	toSend.Write([]byte{uint8(u16CRC & 0x0FF)})
 
@@ -104,111 +116,143 @@ func sendBlock(c io.ReadWriter, block uint8, data []byte) error {
 	return nil
 }
 
-func ModemSend(c io.ReadWriter, data []byte, filename string) error {
+func ModemSend(c io.ReadWriter, bs int, files []File) error {
 	oBuffer := make([]byte, 1)
 
-	// Wait for Poll
-	if _, err := c.Read(oBuffer); err != nil {
-		return err
+	cancel := func() {
+		_, _ = c.Write([]byte{CAN, CAN})
 	}
 
-	// Send zero block with filename and size
-	if oBuffer[0] == POLL {
-		var send bytes.Buffer
-		send.WriteString(filename)
-		send.WriteByte(0x0)
-		send.WriteString(fmt.Sprintf("%d", len(data)))
-		for send.Len() < LONG_PACKET_PAYLOAD_LEN {
-			send.Write([]byte{0x0})
+	var err error
+
+	defer func() {
+		if err != nil {
+			cancel()
+		}
+	}()
+
+	pBars := mpb.New(mpb.WithWidth(64))
+
+	for fi := range files {
+		var blocks = len(files[fi].Data) / bs
+		if len(files[fi].Data) > (blocks * bs) {
+			blocks++
 		}
 
-		sendBlock(c, 0, send.Bytes())
+		blocks++
 
-		// Wait for ACK
-		if _, err := c.Read(oBuffer); err != nil {
+		files[fi].blocks = blocks
+
+		files[fi].bytesBar = pBars.AddBar(int64(len(files[fi].Data)),
+			mpb.BarClearOnComplete(),
+			mpb.PrependDecorators(
+				decor.Name(files[fi].Name, decor.WC{W: len(files[fi].Name) + 1, C: decor.DidentRight}),
+				decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
+				decor.OnComplete(decor.Name("", decor.WCSyncSpaceR), " done!"),
+				decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
+			),
+			mpb.AppendDecorators(decor.Percentage(decor.WC{W: 5})),
+		)
+	}
+
+	startTs := time.Now()
+
+	for fi := range files {
+		// Wait for Poll
+		if _, err = c.Read(oBuffer); err != nil {
+			return err
+		}
+
+		// Send zero block with filename and size
+		if oBuffer[0] == POLL {
+			var send bytes.Buffer
+			send.WriteString(files[fi].Name)
+			send.WriteByte(0x0)
+			send.WriteString(fmt.Sprintf("%d ", len(files[fi].Data)))
+			for send.Len() < bs {
+				send.Write([]byte{0x0})
+			}
+
+			if err = sendBlock(c, bs, 0, send.Bytes()); err != nil {
+				return err
+			}
+
+			// Wait for ACK
+			if _, err = c.Read(oBuffer); err != nil {
+				return err
+			}
+
+			if oBuffer[0] != ACK {
+				return errors.New("failed to send initial block")
+			}
+		}
+
+		// Wait for Poll
+		if _, err = c.Read(oBuffer); err != nil {
+			return err
+		}
+
+		// Send file data
+		if oBuffer[0] == POLL {
+			failed := 0
+			var currentBlock = 1
+			for currentBlock < files[fi].blocks && failed < 10 {
+				from := (currentBlock - 1) * bs
+				to := len(files[fi].Data[from:])
+				if to > bs {
+					to = from + bs
+				} else {
+					to += from
+				}
+
+				if err = sendBlock(c, bs, uint8(currentBlock), files[fi].Data[from:to]); err != nil {
+					return err
+				}
+
+				if _, err := c.Read(oBuffer); err != nil {
+					return err
+				}
+
+				if oBuffer[0] == ACK {
+					currentBlock++
+					files[fi].bytesBar.IncrBy(to-from, time.Since(startTs))
+				} else {
+					failed++
+					// _ = failedBlocksBar.Add(1)
+				}
+			}
+		}
+
+		// Wait for NAK and send EOT
+		if _, err = c.Write([]byte{EOT}); err != nil {
+			return err
+		}
+
+		if _, err = c.Read(oBuffer); err != nil {
 			return err
 		}
 
 		if oBuffer[0] != ACK {
-			return errors.New("Failed to send header block")
+			return fmt.Errorf("eot stage 1: expected NAK. received %02X", oBuffer[0])
 		}
-	}
-
-	// Wait for Poll
-	if _, err := c.Read(oBuffer); err != nil {
-		return err
-	}
-
-	// Send remaining data
-	if oBuffer[0] == POLL {
-		var blocks uint8 = uint8(len(data) / LONG_PACKET_PAYLOAD_LEN)
-		if len(data) > int(int(blocks)*int(LONG_PACKET_PAYLOAD_LEN)) {
-			blocks++
-		}
-
-		failed := 0
-		var currentBlock uint8 = 0
-		for currentBlock < blocks && failed < 10 {
-			if int(int(currentBlock+1)*int(LONG_PACKET_PAYLOAD_LEN)) > len(data) {
-				sendBlock(c, currentBlock+1, data[int(currentBlock)*int(LONG_PACKET_PAYLOAD_LEN):])
-			} else {
-				sendBlock(c, currentBlock+1, data[int(currentBlock)*int(LONG_PACKET_PAYLOAD_LEN):(int(currentBlock)+1)*int(LONG_PACKET_PAYLOAD_LEN)])
-			}
-
-			if _, err := c.Read(oBuffer); err != nil {
-				return err
-			}
-
-			if oBuffer[0] == ACK {
-				currentBlock++
-			} else {
-				failed++
-			}
-		}
-	}
-
-	// Wait for NAK and send EOT
-	if _, err := c.Write([]byte{EOT}); err != nil {
-		return err
-	}
-
-	if _, err := c.Read(oBuffer); err != nil {
-		return err
-	}
-
-	if oBuffer[0] != NAK {
-		return errors.New("")
-	}
-
-	// Send EOT again
-	if _, err := c.Write([]byte{EOT}); err != nil {
-		return err
-	}
-
-	if _, err := c.Read(oBuffer); err != nil {
-		return err
-	}
-
-	if oBuffer[0] != ACK {
-		return errors.New("Failed to send end block")
 	}
 
 	// Wait for POLL
-	if _, err := c.Read(oBuffer); err != nil {
+	if _, err = c.Read(oBuffer); err != nil {
 		return err
 	}
 
 	if oBuffer[0] != POLL {
-		return errors.New("Failed to send end block")
+		return errors.New("eot stage 3: failed to send end block")
 	}
 
 	// Send empty block to signify end
 	var zero bytes.Buffer
-	for zero.Len() < LONG_PACKET_PAYLOAD_LEN {
-		zero.Write([]byte{0x0})
-	}
+	zero.Write(make([]byte, bs))
 
-	sendBlock(c, 0, zero.Bytes())
+	if err := sendBlock(c, bs, 0, zero.Bytes()); err != nil {
+		return err
+	}
 
 	// Wait for ACK
 	if _, err := c.Read(oBuffer); err != nil {
@@ -216,15 +260,15 @@ func ModemSend(c io.ReadWriter, data []byte, filename string) error {
 	}
 
 	if oBuffer[0] != ACK {
-		return errors.New("Failed to send end block")
+		return errors.New("stage 4: failed to send end block")
 	}
 
 	return nil
 }
 
-func receivePacket(c io.ReadWriter) ([]byte, error) {
+func receivePacket(c io.ReadWriter, bs int) ([]byte, error) {
 	oBuffer := make([]byte, 1)
-	dBuffer := make([]byte, LONG_PACKET_PAYLOAD_LEN)
+	dBuffer := make([]byte, bs)
 
 	if _, err := c.Read(oBuffer); err != nil {
 		return nil, err
@@ -238,10 +282,10 @@ func receivePacket(c io.ReadWriter) ([]byte, error) {
 	var packetSize int
 	switch pType {
 	case SOH:
-		packetSize = SHORT_PACKET_PAYLOAD_LEN
+		packetSize = bs
 		break
 	case STX:
-		packetSize = LONG_PACKET_PAYLOAD_LEN
+		packetSize = bs
 		break
 	}
 
@@ -301,7 +345,7 @@ func receivePacket(c io.ReadWriter) ([]byte, error) {
 	return pData.Bytes(), nil
 }
 
-func ModemReceive(c io.ReadWriter) (string, []byte, error) {
+func ModemReceive(c io.ReadWriter, bs int) (string, []byte, error) {
 	var data bytes.Buffer
 
 	// Start Connection
@@ -310,7 +354,7 @@ func ModemReceive(c io.ReadWriter) (string, []byte, error) {
 	}
 
 	// Read file information
-	pktData, err := receivePacket(c)
+	pktData, err := receivePacket(c, bs)
 	if err != nil {
 		return "", nil, err
 	}
@@ -327,7 +371,7 @@ func ModemReceive(c io.ReadWriter) (string, []byte, error) {
 
 	// Read Packets
 	for {
-		pktData, err := receivePacket(c)
+		pktData, err := receivePacket(c, bs)
 		if err == InvalidPacket {
 			continue
 		}
@@ -369,7 +413,7 @@ func ModemReceive(c io.ReadWriter) (string, []byte, error) {
 	}
 
 	// Get remaining data ( for now assume one file )
-	if _, err := receivePacket(c); err != nil {
+	if _, err := receivePacket(c, bs); err != nil {
 		return "", nil, err
 	}
 
