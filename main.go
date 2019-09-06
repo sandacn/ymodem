@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"io/ioutil"
 	"log"
 	"os"
@@ -89,7 +90,7 @@ func main() {
 				log.Fatalln(err.Error())
 			}
 
-			log.Println("sent successful")
+			fmt.Println("sent successfully")
 		},
 	}
 	cmdSend.Flags().StringVarP(&port, "port", "p", "", "serial port to connect to")

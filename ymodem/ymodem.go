@@ -132,6 +132,7 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 	}()
 
 	pBars := mpb.New(mpb.WithWidth(64))
+	defer pBars.Wait()
 
 	for fi := range files {
 		var blocks = len(files[fi].Data) / bs
