@@ -12,7 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/tarm/serial"
 
-	"github.com/NotifAI/ymodem/ymodem"
+	"github.com/NotifAi/ymodem/ymodem"
 )
 
 func main() {
