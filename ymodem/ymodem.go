@@ -146,12 +146,12 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 		files[fi].bytesBar = pBars.AddBar(int64(len(files[fi].Data)),
 			mpb.BarClearOnComplete(),
 			mpb.PrependDecorators(
-				decor.Name(files[fi].Name, decor.WC{W: len(files[fi].Name) + 1, C: decor.DidentRight}),
+				decor.Name(files[fi].Name, decor.WC{W: len(files[fi].Name) + 1, C: decor.DSyncSpaceR}),
 				decor.CountersNoUnit("%d / %d", decor.WCSyncWidth),
 				decor.OnComplete(decor.Name("", decor.WCSyncSpaceR), " done!"),
-				decor.OnComplete(decor.EwmaETA(decor.ET_STYLE_MMSS, 0, decor.WCSyncWidth), ""),
 			),
-			mpb.AppendDecorators(decor.Percentage(decor.WC{W: 5})),
+			mpb.AppendDecorators(
+				decor.Percentage(decor.WC{W: 5}),),
 		)
 	}
 
