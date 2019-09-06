@@ -1,4 +1,4 @@
-module github.com/chrizzzzz/go-xmodem
+module github.com/NotifAi/ymodem
 
 go 1.13
 
