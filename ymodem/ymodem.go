@@ -193,20 +193,25 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 			return err
 		}
 
+		min := func (x, y int) int {
+			if x <= y {
+				return x
+			}
+
+			return y
+		}
+
 		// Send file data
 		if oBuffer[0] == POLL {
 			failed := 0
-			var currentBlock = 1
-			for currentBlock < files[fi].blocks && failed < 10 {
-				from := (currentBlock - 1) * bs
-				to := len(files[fi].Data[from:])
-				if to > bs {
-					to = from + bs
-				} else {
-					to += from
-				}
+			var block = 1
+			for block < files[fi].blocks && failed < 10 {
+				from := (block - 1) * bs
+				remaining := len(files[fi].Data[from:])
 
-				if err = sendBlock(c, bs, uint8(currentBlock), files[fi].Data[from:to]); err != nil {
+				to := min(remaining, bs) + from
+
+				if err = sendBlock(c, bs, uint8(block), files[fi].Data[from:to]); err != nil {
 					return err
 				}
 
@@ -215,11 +220,10 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 				}
 
 				if oBuffer[0] == ACK {
-					currentBlock++
+					block++
 					files[fi].bytesBar.IncrBy(to-from, time.Since(startTs))
 				} else {
 					failed++
-					// _ = failedBlocksBar.Add(1)
 				}
 			}
 		}
