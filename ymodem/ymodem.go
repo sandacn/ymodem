@@ -174,38 +174,42 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 			return err
 		}
 
-		// Send zero block with filename and size
-		if oBuffer[0] == POLL && (retryCount > 0) {
-			var send bytes.Buffer
-			send.WriteString(files[fi].Name)
-			send.WriteByte(0x0)
-			send.WriteString(fmt.Sprintf("%d ", len(files[fi].Data)))
-			for send.Len() < bs {
-				send.Write([]byte{0x0})
-			}
+		if oBuffer[0] == POLL {
+			for i := 0; i < 5; i++ {
+				var send bytes.Buffer
+				send.WriteString(files[fi].Name)
+				send.WriteByte(0x0)
+				send.WriteString(fmt.Sprintf("%d ", len(files[fi].Data)))
+				for send.Len() < bs {
+					send.Write([]byte{0x0})
+				}
 
-			if err = sendBlock(c, bs, 0, send.Bytes()); err != nil {
-				return err
-			}
-
-			// Wait for ACK
-			if _, err = c.Read(oBuffer); err != nil {
-				return err
-			}
-
-			switch oBuffer[0] {
-			case NAK:
-				retryCount--
-				if retryCount == 0 {
-					err = errors.New("amount of retries exceeded")
+				if err = sendBlock(c, bs, 0, send.Bytes()); err != nil {
 					return err
 				}
-			case ACK:
-				goto confirmation
-			default:
-				err = errors.New("failed to send initial block")
-				return err
+
+				// Wait for ACK
+				if _, err = c.Read(oBuffer); err != nil {
+					return err
+				}
+
+				switch oBuffer[0] {
+				case NAK:
+					retryCount--
+					if retryCount == 0 {
+						err = errors.New("amount of retries exceeded")
+						return err
+					}
+				case ACK:
+					goto confirmation
+				default:
+					err = errors.New("failed to send initial block")
+					return err
+				}
 			}
+		} else {
+			err = errors.New("invalid handshake symbol")
+			return err
 		}
 
 	confirmation:
