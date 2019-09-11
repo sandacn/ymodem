@@ -158,6 +158,16 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 
 	startTs := time.Now()
 
+	retryCount := 5
+
+	min := func (x, y int) int {
+		if x <= y {
+			return x
+		}
+
+		return y
+	}
+
 	for fi := range files {
 		// Wait for Poll
 		if _, err = c.Read(oBuffer); err != nil {
@@ -165,7 +175,7 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 		}
 
 		// Send zero block with filename and size
-		if oBuffer[0] == POLL {
+		if oBuffer[0] == POLL && (retryCount > 0) {
 			var send bytes.Buffer
 			send.WriteString(files[fi].Name)
 			send.WriteByte(0x0)
@@ -183,22 +193,25 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 				return err
 			}
 
-			if oBuffer[0] != ACK {
-				return errors.New("failed to send initial block")
+			switch oBuffer[0] {
+			case NAK:
+				retryCount--
+				if retryCount == 0 {
+					err = errors.New("amount of retries exceeded")
+					return err
+				}
+			case ACK:
+				goto confirmation
+			default:
+				err = errors.New("failed to send initial block")
+				return err
 			}
 		}
 
+	confirmation:
 		// Wait for Poll
 		if _, err = c.Read(oBuffer); err != nil {
 			return err
-		}
-
-		min := func (x, y int) int {
-			if x <= y {
-				return x
-			}
-
-			return y
 		}
 
 		// Send file data
@@ -228,7 +241,7 @@ func ModemSend(c io.ReadWriter, bs int, files []File) error {
 			}
 		}
 
-		// Wait for NAK and send EOT
+		// Wait for ACK and send EOT
 		if _, err = c.Write([]byte{EOT}); err != nil {
 			return err
 		}
