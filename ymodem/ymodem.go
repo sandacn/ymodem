@@ -104,14 +104,18 @@ func sendBlock(c io.ReadWriter, bs int, block uint8, data []byte) error {
 	toSend.Write([]byte{uint8(u16CRC >> 8)})
 	toSend.Write([]byte{uint8(u16CRC & 0x0FF)})
 
-	sent := 0
-	for sent < toSend.Len() {
-		if n, err := c.Write(toSend.Bytes()[sent:]); err != nil {
-			return err
-		} else {
-			sent += n
-		}
+	// sent := 0
+	for _, b := range toSend.Bytes() {
+		_, _ = c.Write([]byte{b})
+		time.Sleep(10 * time.Millisecond)
 	}
+	// for sent < toSend.Len() {
+	// 	if n, err := c.Write(toSend.Bytes()[sent:]); err != nil {
+	// 		return err
+	// 	} else {
+	// 		sent += n
+	// 	}
+	// }
 
 	return nil
 }
