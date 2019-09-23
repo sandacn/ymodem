@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/NotifAi/serial"
 	"github.com/spf13/cobra"
-	"github.com/tarm/serial"
 
 	"github.com/NotifAi/ymodem/ymodem"
 )
@@ -146,7 +146,7 @@ func main() {
 			if err != nil {
 				log.Fatalln(err)
 			}
-			_, _= fOut.Write(data)
+			_, _ = fOut.Write(data)
 			_ = fOut.Close()
 
 			log.Println(filename, "write successful")
@@ -161,7 +161,7 @@ func main() {
 		Use:   "ymodem",
 		Short: "",
 		Long:  ``,
-		Run:   func(cmd *cobra.Command, args []string) {
+		Run: func(cmd *cobra.Command, args []string) {
 			if blockSize == "" {
 				bSize = 128
 			} else {
