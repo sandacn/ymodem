@@ -1,12 +1,10 @@
-package main
+package ytypes
 
 import (
 	"time"
 
 	"github.com/vbauerster/mpb/v4"
 	"github.com/vbauerster/mpb/v4/decor"
-
-	ytypes "github.com/NotifAi/ymodem/types"
 )
 
 type bars struct {
@@ -19,10 +17,10 @@ type bar struct {
 	startTs time.Time
 }
 
-var _ ytypes.Progress = (*bars)(nil)
-var _ ytypes.Bar = (*bar)(nil)
+var _ Progress = (*bars)(nil)
+var _ Bar = (*bar)(nil)
 
-func newProgress() ytypes.Progress {
+func NewProgress() Progress {
 	b := &bars{
 		b: mpb.New(mpb.WithWidth(64)),
 	}
@@ -30,7 +28,7 @@ func newProgress() ytypes.Progress {
 	return b
 }
 
-func (b *bars) Create(name string, ln int) ytypes.Bar {
+func (b *bars) Create(name string, ln int) Bar {
 	br := &bar{
 		b: b.b.AddBar(int64(ln),
 			mpb.BarClearOnComplete(),

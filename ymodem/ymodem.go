@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/howeyc/crc16"
+
 	ytypes "github.com/NotifAi/ymodem/types"
 )
 
@@ -26,69 +28,17 @@ type File struct {
 	bytesBar ytypes.Bar
 }
 
-func CRC16(data []byte) uint16 {
-	var u16CRC uint16 = 0
-
-	for _, character := range data {
-		part := uint16(character)
-
-		u16CRC = u16CRC ^ (part << 8)
-		for i := 0; i < 8; i++ {
-			if u16CRC&0x8000 > 0 {
-				u16CRC = u16CRC<<1 ^ 0x1021
-			} else {
-				u16CRC = u16CRC << 1
-			}
-		}
-	}
-
-	return u16CRC
-}
-
-func CRC16Constant(data []byte, length int) uint16 {
-	var u16CRC uint16 = 0
-
-	for _, character := range data {
-		part := uint16(character)
-
-		u16CRC = u16CRC ^ (part << 8)
-		for i := 0; i < 8; i++ {
-			if u16CRC&0x8000 > 0 {
-				u16CRC = u16CRC<<1 ^ 0x1021
-			} else {
-				u16CRC = u16CRC << 1
-			}
-		}
-	}
-
-	for c := 0; c < length-len(data); c++ {
-		u16CRC = u16CRC ^ (0x04 << 8)
-		for i := 0; i < 8; i++ {
-			if u16CRC&0x8000 > 0 {
-				u16CRC = u16CRC<<1 ^ 0x1021
-			} else {
-				u16CRC = u16CRC << 1
-			}
-		}
-	}
-
-	return u16CRC
-}
-
 func sendBlock(c io.ReadWriter, bs int, block uint8, data []byte) error {
-	// send STX
-	if _, err := c.Write([]byte{SOH}); err != nil {
-		return err
-	}
-	if _, err := c.Write([]byte{block}); err != nil {
-		return err
-	}
-	if _, err := c.Write([]byte{255 - block}); err != nil {
-		return err
+	var toSend bytes.Buffer
+
+	if bs == 128 {
+		toSend.WriteByte(SOH)
+	} else {
+		toSend.WriteByte(STX)
 	}
 
-	// send data
-	var toSend bytes.Buffer
+	toSend.WriteByte(block) // block id
+	toSend.WriteByte(255 - block) // 2nd complement to block id
 	toSend.Write(data)
 
 	padding := bs - len(data)
@@ -97,10 +47,9 @@ func sendBlock(c io.ReadWriter, bs int, block uint8, data []byte) error {
 		toSend.Write(buf)
 	}
 
-	// calc CRC
-	u16CRC := CRC16Constant(data, bs)
-	toSend.Write([]byte{uint8(u16CRC >> 8)})
-	toSend.Write([]byte{uint8(u16CRC & 0x0FF)})
+	crc := crc16.ChecksumCCITTFalse(toSend.Bytes()[3:])
+	toSend.Write([]byte{uint8(crc >> 8)})
+	toSend.Write([]byte{uint8(crc & 0x0FF)})
 
 	sent := 0
 	for sent < toSend.Len() {
@@ -123,6 +72,12 @@ func ModemSend(c io.ReadWriter, progress ytypes.Progress, bs int, files []File) 
 
 	cancel := func() {
 		_, _ = c.Write([]byte{CAN, CAN})
+	}
+
+	padding := make([]byte, bs)
+
+	for i := range padding {
+		padding[i] = 0
 	}
 
 	var err error
@@ -167,8 +122,8 @@ func ModemSend(c io.ReadWriter, progress ytypes.Progress, bs int, files []File) 
 				send.WriteString(files[fi].Name)
 				send.WriteByte(0x0)
 				send.WriteString(fmt.Sprintf("%d ", len(files[fi].Data)))
-				for send.Len() < bs {
-					send.Write([]byte{0x0})
+				if send.Len() < bs {
+					send.Write(padding[:bs-send.Len()])
 				}
 
 				if err = sendBlock(c, bs, 0, send.Bytes()); err != nil {
@@ -340,8 +295,7 @@ func receivePacket(c io.ReadWriter, bs int) ([]byte, error) {
 	crc |= uint16(oBuffer[0])
 
 	// Calculate CRC
-	crcCalc := CRC16(pData.Bytes())
-	if crcCalc != crc {
+	if crc16.ChecksumCCITTFalse(pData.Bytes()) != crc {
 		if _, err := c.Write([]byte{NAK}); err != nil {
 			return nil, err
 		}

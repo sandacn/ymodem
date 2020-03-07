@@ -13,6 +13,7 @@ import (
 	"github.com/NotifAi/serial"
 	"github.com/spf13/cobra"
 
+	ytypes "github.com/NotifAi/ymodem/types"
 	"github.com/NotifAi/ymodem/ymodem"
 )
 
@@ -31,7 +32,7 @@ func main() {
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Open connection
-			connection, err := serial.OpenPort(&serial.Config{Name: port, Baud: 115200})
+			connection, err := serial.OpenPort(serial.Config{Name: port, Baud: 115200})
 			if err != nil {
 				log.Fatalln(err)
 			}
@@ -85,7 +86,7 @@ func main() {
 				files = append(files, ymodem.File{Data: data, Name: filepath.Base(f)})
 			}
 
-			bar := newProgress()
+			bar := ytypes.NewProgress()
 			// Send files
 			err = ymodem.ModemSend(connection, bar, bSize, files)
 
@@ -109,7 +110,7 @@ func main() {
 		Long:  ``,
 		Run: func(cmd *cobra.Command, args []string) {
 			// Open connection
-			connection, err := serial.OpenPort(&serial.Config{Name: port, Baud: 115200})
+			connection, err := serial.OpenPort(serial.Config{Name: port, Baud: 115200})
 			if err != nil {
 				log.Fatalln(err)
 			}
