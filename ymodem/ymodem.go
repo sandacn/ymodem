@@ -8,7 +8,7 @@ import (
 
 	"github.com/howeyc/crc16"
 
-	ytypes "github.com/NotifAi/ymodem/types"
+	ytypes "github.com/notifai/ymodem/types"
 )
 
 const SOH byte = 0x01

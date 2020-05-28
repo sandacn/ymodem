@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/NotifAi/serial"
+	"github.com/notifai/serial"
 	"github.com/spf13/cobra"
 
-	ytypes "github.com/NotifAi/ymodem/types"
-	"github.com/NotifAi/ymodem/ymodem"
+	ytypes "github.com/notifai/ymodem/types"
+	"github.com/notifai/ymodem/ymodem"
 )
 
 func main() {
