@@ -72,6 +72,8 @@ func ModemSend(c io.ReadWriter, progress ytypes.Progress, bs int, files []File) 
 		progress = ytypes.DummyProgress()
 	}
 
+	defer progress.Shutdown()
+
 	cancel := func() {
 		_, _ = c.Write([]byte{CAN, CAN})
 	}
