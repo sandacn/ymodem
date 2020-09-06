@@ -11,13 +11,15 @@ import (
 	ytypes "github.com/notifai/ymodem/types"
 )
 
-const SOH byte = 0x01
-const STX byte = 0x02
-const EOT byte = 0x04
-const ACK byte = 0x06
-const NAK byte = 0x15
-const CAN byte = 0x18
-const POLL byte = 0x43
+const (
+	SOH  byte = 0x01
+	STX  byte = 0x02
+	EOT  byte = 0x04
+	ACK  byte = 0x06
+	NAK  byte = 0x15
+	CAN  byte = 0x18
+	POLL byte = 0x43
+)
 
 var InvalidPacket = errors.New("invalid packet")
 
@@ -37,7 +39,7 @@ func sendBlock(c io.ReadWriter, bs int, block uint8, data []byte) error {
 		toSend.WriteByte(STX)
 	}
 
-	toSend.WriteByte(block) // block id
+	toSend.WriteByte(block)       // block id
 	toSend.WriteByte(255 - block) // 2nd complement to block id
 	toSend.Write(data)
 
@@ -142,6 +144,14 @@ func ModemSend(c io.ReadWriter, progress ytypes.Progress, bs int, files []File) 
 						err = errors.New("amount of retries exceeded")
 						return err
 					}
+				case CAN:
+					// receiver is seem to cancel current transaction
+					// wait for yet another CAN symbol
+					if _, err = c.Read(oBuffer); err != nil {
+						return err
+					}
+					err = errors.New("receiver rejected to create file")
+					return err
 				case ACK:
 					goto confirmation
 				default:
@@ -150,7 +160,7 @@ func ModemSend(c io.ReadWriter, progress ytypes.Progress, bs int, files []File) 
 				}
 			}
 		} else {
-			err = errors.New("invalid handshake symbol")
+			err = fmt.Errorf("invalid handshake symbol %c", oBuffer[0])
 			return err
 		}
 
