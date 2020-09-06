@@ -147,10 +147,10 @@ func ModemSend(c io.ReadWriter, progress ytypes.Progress, bs int, files []File) 
 				case CAN:
 					// receiver is seem to cancel current transaction
 					// wait for yet another CAN symbol followed by ACK
-					if _, err = c.Read(oBuffer); err != nil {
-						return err
-					}
-					if _, err = c.Read(oBuffer); err != nil {
+					tmpBuf := make([]byte, 3)
+					// receiver is seem to cancel current transaction
+					// wait for yet another CAN symbol followed by ACK
+					if _, err = c.Read(tmpBuf); err != nil {
 						return err
 					}
 					err = errors.New("receiver rejected to create file")
